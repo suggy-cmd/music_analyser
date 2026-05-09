@@ -491,7 +491,7 @@ def main():
     parser.add_argument("audio", help="Audio file (MP3, WAV, FLAC, AAC, etc.)")
     parser.add_argument(
         "--format", choices=["text", "csv", "json", "edl", "timing", "all"],
-        default="text", help="Output format (default: text)"
+        default="timing", help="Output format (default: timing)"
     )
     parser.add_argument(
         "--out", default=None, help="Output file path (default: <audio>_transitions.<ext>)"
@@ -538,12 +538,12 @@ def main():
         "--beats-only", action="store_true", help="Only output beat positions"
     )
     parser.add_argument(
-        "--min-clip", type=float, default=None,
-        help="Minimum seconds between transitions, keeping highest-scored (e.g. 1.0)"
+        "--min-clip", type=float, default=1.0,
+        help="Minimum clip length in seconds (default: 1.0)"
     )
     parser.add_argument(
-        "--max-clip", type=float, default=None,
-        help="Maximum seconds between transitions; use with --min-clip for varied clip lengths (e.g. 4.0)"
+        "--max-clip", type=float, default=4.0,
+        help="Maximum clip length in seconds (default: 4.0)"
     )
     parser.add_argument(
         "--video", action="store_true",
@@ -606,14 +606,7 @@ def main():
         beat_times=beat_data["beat_times"],
     )
 
-    if args.max_clip is not None:
-        transitions = apply_clip_bounds(
-            transitions,
-            min_clip=args.min_clip if args.min_clip is not None else 0.0,
-            max_clip=args.max_clip,
-        )
-    elif args.min_clip:
-        transitions = apply_min_clip_length(transitions, args.min_clip)
+    transitions = apply_clip_bounds(transitions, min_clip=args.min_clip, max_clip=args.max_clip)
 
     transitions = snap_to_beats(transitions, beat_data["beat_times"])
 

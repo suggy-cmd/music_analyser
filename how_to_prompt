@@ -1,0 +1,8 @@
+# produces shandr_drifting_away_timing_plan.json with 1–4s clips
+python analyser.py shandr_drifting_away.mp3
+
+# Override clip range
+python analyser.py shandr_drifting_away.mp3 --min-clip 0.5 --max-clip 3.0
+
+# Explicit output path
+python analyser.py shandr_drifting_away.mp3 --out my_plan.json
