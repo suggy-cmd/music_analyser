@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Video Tour Pipeline</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f5f4f0;
+    color: #1a1a1a;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
+  }
+
+  header {
+    width: 100%;
+    max-width: 680px;
+    margin-bottom: 32px;
+  }
+
+  header h1 {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #888;
+    margin-bottom: 6px;
+  }
+
+  header p {
+    font-size: 24px;
+    font-weight: 700;
+    color: #111;
+  }
+
+  /* ── Progress bar ── */
+  .progress-bar {
+    width: 100%;
+    max-width: 680px;
+    height: 4px;
+    background: #e0deda;
+    border-radius: 2px;
+    margin-bottom: 32px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: #c8a96e;
+    border-radius: 2px;
+    transition: width 0.4s ease;
+  }
+
+  /* ── Dropdown trigger ── */
+  .step-selector {
+    width: 100%;
+    max-width: 680px;
+    position: relative;
+    margin-bottom: 24px;
+  }
+
+  .selector-trigger {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    background: #fff;
+    border: 1.5px solid #e0deda;
+    border-radius: 12px;
+    cursor: pointer;
+    user-select: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .selector-trigger:hover {
+    border-color: #c8a96e;
+    box-shadow: 0 2px 12px rgba(200,169,110,0.12);
+  }
+
+  .selector-trigger.open {
+    border-color: #c8a96e;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    box-shadow: none;
+  }
+
+  .trigger-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .step-badge {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    background: #c8a96e;
+    color: #fff;
+    padding: 3px 8px;
+    border-radius: 5px;
+    white-space: nowrap;
+  }
+
+  .step-badge.complete { background: #4caf7d; }
+  .step-badge.pending  { background: #d0ccc5; }
+
+  .trigger-label {
+    font-size: 16px;
+    font-weight: 600;
+    color: #111;
+  }
+
+  .trigger-sub {
+    font-size: 13px;
+    color: #888;
+    margin-top: 2px;
+  }
+
+  .chevron {
+    width: 18px;
+    height: 18px;
+    transition: transform 0.25s ease;
+    color: #888;
+    flex-shrink: 0;
+  }
+
+  .chevron.open { transform: rotate(180deg); }
+
+  /* ── Dropdown list ── */
+  .step-list {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: #fff;
+    border: 1.5px solid #c8a96e;
+    border-top: none;
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
+    overflow: hidden;
+    z-index: 10;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+  }
+
+  .step-list.open { display: block; }
+
+  .step-option {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 13px 20px;
+    cursor: pointer;
+    transition: background 0.15s;
+    border-top: 1px solid #f0ede8;
+  }
+
+  .step-option:first-child { border-top: none; }
+  .step-option:hover { background: #faf8f4; }
+  .step-option.active { background: #fef9f0; }
+
+  .option-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .option-icon.done    { background: #e8f5ee; color: #4caf7d; }
+  .option-icon.current { background: #c8a96e; color: #fff; }
+  .option-icon.pending { background: #f0ede8; color: #bbb; }
+
+  .option-text { flex: 1; }
+
+  .option-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #111;
+  }
+
+  .option-name.pending { color: #aaa; }
+
+  .option-desc {
+    font-size: 12px;
+    color: #aaa;
+    margin-top: 1px;
+  }
+
+  .option-tick {
+    font-size: 14px;
+    color: #4caf7d;
+    flex-shrink: 0;
+  }
+
+  /* ── Detail card ── */
+  .detail-card {
+    width: 100%;
+    max-width: 680px;
+    background: #fff;
+    border-radius: 12px;
+    border: 1.5px solid #e0deda;
+    padding: 28px 28px 24px;
+  }
+
+  .detail-eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #c8a96e;
+    margin-bottom: 8px;
+  }
+
+  .detail-title {
+    font-size: 22px;
+    font-weight: 700;
+    color: #111;
+    margin-bottom: 10px;
+  }
+
+  .detail-desc {
+    font-size: 15px;
+    color: #555;
+    line-height: 1.6;
+    margin-bottom: 24px;
+  }
+
+  .detail-meta {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .meta-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    background: #f5f4f0;
+    border-radius: 8px;
+    padding: 6px 12px;
+    color: #555;
+  }
+
+  .meta-pill span { font-weight: 600; color: #222; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Real Estate Video Tour</h1>
+  <p id="job-name">123 Riverside Drive</p>
+</header>
+
+<div class="progress-bar">
+  <div class="progress-fill" id="progress-fill"></div>
+</div>
+
+<div class="step-selector" id="step-selector">
+  <div class="selector-trigger" id="selector-trigger" onclick="toggleDropdown()">
+    <div class="trigger-left">
+      <div class="step-badge" id="trigger-badge"></div>
+      <div>
+        <div class="trigger-label" id="trigger-label"></div>
+        <div class="trigger-sub" id="trigger-sub"></div>
+      </div>
+    </div>
+    <svg class="chevron" id="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="6 9 12 15 18 9"></polyline>
+    </svg>
+  </div>
+
+  <div class="step-list" id="step-list"></div>
+</div>
+
+<div class="detail-card">
+  <div class="detail-eyebrow" id="detail-eyebrow"></div>
+  <div class="detail-title"  id="detail-title"></div>
+  <div class="detail-desc"   id="detail-desc"></div>
+  <div class="detail-meta"   id="detail-meta"></div>
+</div>
+
+<script>
+const STEPS = [
+  {
+    id: "1",
+    label: "Images Received",
+    sub: "Source material ingested",
+    desc: "Raw property photos have been received and are ready to enter the pipeline. Photos are verified for count and quality before proceeding.",
+    meta: [
+      { key: "Input",  val: "Photos from photographer" },
+      { key: "Output", val: "Verified image set" },
+    ],
+  },
+  {
+    id: "2a",
+    label: "Planner",
+    sub: "Tags, audio & shot assignment",
+    desc: "Each photo is assigned a unique ID tag, a music track is selected, and every photo is mapped to a specific video shot type (wide, medium, detail, etc.).",
+    meta: [
+      { key: "Input",  val: "Image set" },
+      { key: "Output", val: "Shot plan + audio selection" },
+    ],
+  },
+  {
+    id: "2b",
+    label: "Taxonomy",
+    sub: "Best-feature classification",
+    desc: "A taxonomy model determines the single strongest feature of each photo — e.g. light, space, finishes, view — to guide where the camera focuses in the next step.",
+    meta: [
+      { key: "Input",  val: "Tagged image set" },
+      { key: "Output", val: "Feature labels per photo" },
+    ],
+  },
+  {
+    id: "3",
+    label: "Feature Photo Generation",
+    sub: "Point-of-interest crop & zoom",
+    desc: "For each photo, a zoomed-in crop is generated that frames the point of interest identified in the taxonomy step. This becomes the hero frame for each clip.",
+    meta: [
+      { key: "Input",  val: "Feature labels + images" },
+      { key: "Output", val: "Cropped feature photos" },
+    ],
+  },
+  {
+    id: "4",
+    label: "Clip Generation",
+    sub: "Static photos → video clips",
+    desc: "Each feature photo is animated into a short video clip — typically a slow zoom or pan — giving the still image a cinematic, moving feel.",
+    meta: [
+      { key: "Input",  val: "Feature photos" },
+      { key: "Output", val: "Individual video clips (1–4s each)" },
+    ],
+  },
+  {
+    id: "5",
+    label: "Video Editing",
+    sub: "Assembly with audio & transitions",
+    desc: "All clips are assembled in order with audio-driven timing. Transition lengths are set to match the music, and the final cut is rendered.",
+    meta: [
+      { key: "Input",  val: "Clips + audio + shot plan" },
+      { key: "Output", val: "Final rendered video" },
+    ],
+  },
+  {
+    id: "6",
+    label: "Send Final Video",
+    sub: "Delivered to client",
+    desc: "The finished video is packaged and emailed to the client. The job is marked complete.",
+    meta: [
+      { key: "Input",  val: "Final video" },
+      { key: "Output", val: "Email delivery to client" },
+    ],
+  },
+];
+
+let currentIndex = 0;
+
+function render() {
+  const step = STEPS[currentIndex];
+  const total = STEPS.length;
+
+  // Progress
+  document.getElementById("progress-fill").style.width =
+    ((currentIndex + 1) / total * 100) + "%";
+
+  // Trigger
+  const badge = document.getElementById("trigger-badge");
+  badge.textContent = `STEP ${step.id}`;
+  badge.className = "step-badge";
+  document.getElementById("trigger-label").textContent = step.label;
+  document.getElementById("trigger-sub").textContent = step.sub;
+
+  // List
+  const list = document.getElementById("step-list");
+  list.innerHTML = STEPS.map((s, i) => {
+    const state = i < currentIndex ? "done" : i === currentIndex ? "current" : "pending";
+    const icon = state === "done" ? "✓" : s.id;
+    return `
+      <div class="step-option ${state === 'current' ? 'active' : ''}" onclick="selectStep(${i})">
+        <div class="option-icon ${state}">${icon}</div>
+        <div class="option-text">
+          <div class="option-name ${state === 'pending' ? 'pending' : ''}">${s.label}</div>
+          <div class="option-desc">${s.sub}</div>
+        </div>
+        ${state === 'done' ? '<div class="option-tick">✓</div>' : ''}
+        ${state === 'current' ? '<div class="option-tick" style="color:#c8a96e">●</div>' : ''}
+      </div>`;
+  }).join("");
+
+  // Detail card
+  document.getElementById("detail-eyebrow").textContent = `Step ${step.id} of ${total}`;
+  document.getElementById("detail-title").textContent = step.label;
+  document.getElementById("detail-desc").textContent = step.desc;
+  document.getElementById("detail-meta").innerHTML = step.meta.map(m =>
+    `<div class="meta-pill">${m.key}: <span>${m.val}</span></div>`
+  ).join("");
+}
+
+function selectStep(i) {
+  currentIndex = i;
+  render();
+  closeDropdown();
+}
+
+function toggleDropdown() {
+  const trigger = document.getElementById("selector-trigger");
+  const list    = document.getElementById("step-list");
+  const chevron = document.getElementById("chevron");
+  const open    = list.classList.contains("open");
+  if (open) {
+    closeDropdown();
+  } else {
+    trigger.classList.add("open");
+    list.classList.add("open");
+    chevron.classList.add("open");
+  }
+}
+
+function closeDropdown() {
+  document.getElementById("selector-trigger").classList.remove("open");
+  document.getElementById("step-list").classList.remove("open");
+  document.getElementById("chevron").classList.remove("open");
+}
+
+document.addEventListener("click", e => {
+  if (!document.getElementById("step-selector").contains(e.target)) closeDropdown();
+});
+
+render();
+</script>
+</body>
+</html>
