@@ -341,10 +341,6 @@ def export_edl_markers(transitions, fps, path):
             f.write(f"{i}\t{tc}\t00:00:01\t{t['type']}\tscore={t['score']}\n")
 
 
-def _escape_dt(s: str) -> str:
-    return s.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
-
-
 def _find_font() -> str:
     candidates = [
         "/Library/Fonts/Inter_18pt-Regular.ttf",
@@ -362,8 +358,8 @@ def _find_font() -> str:
     return hits[0] if hits else ""
 
 
-def export_video(transitions, audio_path, duration, output_path, width=1280, height=720, fps: int = 25):
-    """Generate a red/blue alternating colour video with type/score overlay and MP3 audio."""
+def export_video(transitions, audio_path, duration, output_path, width=1280, height=720, fps: int = 25, bpm: float = None):
+    """Generate a styled HUD video: clip number, type, score, duration, IN/OUT, progress bar."""
     try:
         import imageio_ffmpeg
         ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
@@ -374,47 +370,147 @@ def export_video(transitions, audio_path, duration, output_path, width=1280, hei
         return False
 
     sorted_t = sorted(transitions, key=lambda x: x["time"])
+    palette = ["0x5C0F0F", "0x0F0F52", "0x0D3D52", "0x31094A"]
 
-    # Build alternating colour segments between transition points
-    segments = []   # (color, duration, transition_or_None)
-    current_color = "red"
+    segments = []
     prev_time = 0.0
-
-    for t in sorted_t:
+    for idx, t in enumerate(sorted_t):
         seg_dur = round(t["time"] - prev_time, 6)
         if seg_dur >= 0.001:
-            segments.append((current_color, seg_dur, None))
-        current_color = "blue" if current_color == "red" else "red"
+            segments.append({
+                "color": palette[idx % len(palette)],
+                "duration": seg_dur,
+                "start_time": prev_time,
+                "clip_num": idx + 1,
+                "tr_in": sorted_t[idx - 1] if idx > 0 else None,
+            })
         prev_time = t["time"]
 
     final_dur = round(duration - prev_time, 6)
     if final_dur >= 0.001:
-        segments.append((current_color, final_dur, None))
+        idx = len(sorted_t)
+        segments.append({
+            "color": palette[idx % len(palette)],
+            "duration": final_dur,
+            "start_time": prev_time,
+            "clip_num": idx + 1,
+            "tr_in": sorted_t[-1] if sorted_t else None,
+        })
 
     if not segments:
-        segments = [("red", duration, None)]
+        segments = [{"color": palette[0], "duration": duration, "start_time": 0.0,
+                     "clip_num": 1, "tr_in": None}]
 
-    # Build ffmpeg filter_complex: burn text into each colour segment, then concat.
-    # Text is part of the segment so colour and label always change on the same frame.
+    total_clips = len(segments)
     font = _find_font()
-    fontfile_opt = f":fontfile='{font}'" if font else ""
+    ff = f":fontfile='{font}'" if font else ""
+
+    def esc(s: str) -> str:
+        return str(s).replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
+
+    # Panel layout
+    pw, ph = 590, 290
+    tb_h = 36
+    px = 30
+    py = height - 30 - ph
+
+    CYAN   = "0x5EC8DC"
+    AMBER  = "0xFFAA00"
+    RED_S  = "0xFF6655"
+    GREY   = "0x888888"
+
     filter_parts = []
     labels = []
-    for i, (color, dur, _) in enumerate(segments):
-        if i == 0 or not sorted_t:
-            label = _escape_dt(f"clip 1  |  start  |  {dur:.2f}s")
-        else:
-            tr = sorted_t[i - 1]
-            label = _escape_dt(f"clip {i + 1}  |  {tr['type']}  |  score {tr['score']:.2f}  |  {dur:.2f}s")
-        dt = (
-            f"drawtext=text='{label}'"
-            f"{fontfile_opt}"
-            f":fontsize=40:fontcolor=white@0.9"
-            f":x=30:y=h-80"
-            f":box=1:boxcolor=black@0.55:boxborderw=10"
+
+    for i, seg in enumerate(segments):
+        seg_dur   = seg["duration"]
+        start_t   = seg["start_time"]
+        clip_num  = seg["clip_num"]
+        tr_in     = seg["tr_in"]
+
+        trans_type = tr_in["type"].upper() if tr_in else "START"
+        score_val  = tr_in["score"] if tr_in else 0.0
+        sc = CYAN if score_val >= 0.7 else (AMBER if score_val >= 0.4 else (RED_S if tr_in else GREY))
+
+        in_str    = esc(f"{start_t:.2f}s")
+        out_str   = esc(f"{start_t + seg_dur:.2f}s")
+        dur_str   = esc(f"{seg_dur:.2f}s")
+        score_str = esc(f"{score_val:.2f}")
+        type_str  = esc(trans_type)
+        clip_str  = esc(f"CLIP {clip_num}")
+        ctr_str   = esc(f"{clip_num} / {total_clips}")
+        bpm_str   = esc(f"  {bpm:.1f} BPM") if bpm else ""
+
+        score_bw   = 350
+        score_fill = max(2, round(score_bw * score_val)) if score_val > 0 else 0
+
+        slider_w   = 200
+        slider_x   = px + pw - slider_w - 14
+        slider_pos = max(4, min(slider_w - 4, round(slider_w * start_t / max(duration, 1))))
+
+        # Static progress fill width at the start of this segment
+        prog_fill_w = round(pw * start_t / max(duration, 0.001))
+
+        # Y positions inside panel
+        y_scrub    = py + tb_h + 8
+        y_clip     = py + tb_h + 30
+        y_tp       = py + tb_h + 102
+        y_row1     = py + tb_h + 118
+        y_row2     = py + tb_h + 170
+        y_score_bar = py + tb_h + 214
+
+        xl = px + 16        # left column x
+        xr = px + 202       # right column x
+
+        f_chain = ",".join([
+            # Panel bg + title bar
+            f"drawbox=x={px}:y={py}:w={pw}:h={ph}:color=0x0d0604@0.88:t=fill",
+            f"drawbox=x={px}:y={py}:w={pw}:h={tb_h}:color=0x1f0d09@0.95:t=fill",
+            f"drawbox=x={px}:y={py+tb_h-1}:w={pw}:h=1:color=0xffffff@0.10:t=fill",
+            f"drawbox=x={px}:y={py}:w={pw}:h={ph}:color=0xffffff@0.16:t=2",
+            # Title bar text
+            f"drawtext=text='TRANSITION LOCATOR{bpm_str}'{ff}:fontsize=13:fontcolor=0xaaaaaa@0.85:x={xl}:y={py+11}",
+            f"drawtext=text='{ctr_str}'{ff}:fontsize=12:fontcolor=0x555555:x={px+pw-58}:y={py+13}",
+            # Mini scrubber (top-right body area)
+            f"drawtext=text='{in_str}'{ff}:fontsize=11:fontcolor=0xcccccc@0.8:x={slider_x-46}:y={y_scrub}",
+            f"drawbox=x={slider_x}:y={y_scrub+2}:w={slider_w}:h=3:color=0x444444@0.7:t=fill",
+            f"drawbox=x={slider_x}:y={y_scrub+2}:w={slider_pos}:h=3:color={CYAN}@0.5:t=fill",
+            f"drawbox=x={slider_x+slider_pos-2}:y={y_scrub-3}:w=5:h=11:color={CYAN}@0.9:t=fill",
+            # CLIP N (large)
+            f"drawtext=text='{clip_str}'{ff}:fontsize=54:fontcolor=white:x={xl}:y={y_clip}",
+            # "TIMING PARAMETERS:"
+            f"drawtext=text='TIMING PARAMETERS\\:'{ff}:fontsize=12:fontcolor=0x777777:x={xl}:y={y_tp}",
+            # Row 1 — [IN box] | TYPE
+            f"drawbox=x={xl}:y={y_row1}:w=174:h=46:color={CYAN}@0.07:t=fill",
+            f"drawbox=x={xl}:y={y_row1}:w=174:h=46:color={CYAN}@0.50:t=2",
+            f"drawtext=text='IN\\:'{ff}:fontsize=12:fontcolor={CYAN}@0.85:x={xl+8}:y={y_row1+5}",
+            f"drawtext=text='{in_str}'{ff}:fontsize=22:fontcolor={CYAN}:x={xl+42}:y={y_row1+3}",
+            f"drawtext=text='TYPE'{ff}:fontsize=12:fontcolor={GREY}:x={xr}:y={y_row1}",
+            f"drawtext=text='{type_str}'{ff}:fontsize=16:fontcolor=white:x={xr}:y={y_row1+18}",
+            # Row 2 — [OUT box] | SCORE
+            f"drawbox=x={xl}:y={y_row2}:w=174:h=58:color=0x333333@0.35:t=fill",
+            f"drawbox=x={xl}:y={y_row2}:w=174:h=58:color=0x666666@0.40:t=2",
+            f"drawtext=text='OUT\\:'{ff}:fontsize=12:fontcolor=0x999999:x={xl+8}:y={y_row2+5}",
+            f"drawtext=text='{out_str}'{ff}:fontsize=22:fontcolor=white:x={xl+42}:y={y_row2+3}",
+            f"drawtext=text='SCORE'{ff}:fontsize=12:fontcolor={GREY}:x={xr}:y={y_row2}",
+            f"drawtext=text='{score_str}'{ff}:fontsize=20:fontcolor={sc}:x={xr}:y={y_row2+17}",
+            # Duration label (bottom-right of row 2 box area)
+            f"drawtext=text='DUR  {dur_str}'{ff}:fontsize=12:fontcolor=0x888888:x={xl+8}:y={y_row2+40}",
+            # Score bar
+            f"drawbox=x={xr}:y={y_score_bar}:w={score_bw}:h=5:color=0x333333@0.7:t=fill",
+        ])
+
+        if score_fill > 0:
+            f_chain += f",drawbox=x={xr}:y={y_score_bar}:w={score_fill}:h=5:color={sc}@0.9:t=fill"
+
+        # Static progress bar above panel (position at start of segment)
+        f_chain += (
+            f",drawbox=x={px}:y={py-9}:w={pw}:h=5:color=0x1a1a1a@0.8:t=fill"
+            f",drawbox=x={px}:y={py-9}:w={prog_fill_w}:h=5:color={CYAN}@0.9:t=fill"
         )
-        filter_parts.append(f"color=c={color}:s={width}x{height}:r=1000:d={dur:.6f}[c{i}]")
-        filter_parts.append(f"[c{i}]{dt}[s{i}]")
+
+        filter_parts.append(f"color=c={seg['color']}:s={width}x{height}:r=1000:d={seg_dur:.6f}[c{i}]")
+        filter_parts.append(f"[c{i}]{f_chain}[s{i}]")
         labels.append(f"[s{i}]")
 
     filter_parts.append(
@@ -656,7 +752,7 @@ def main():
         w, h = map(int, args.video_size.split("x"))
         video_path = audio_path.parent / f"{stem}_transitions.mp4"
         video_fps = int(args.fps) if args.fps else 25
-        export_video(transitions, audio_path, duration, video_path, w, h, fps=video_fps)
+        export_video(transitions, audio_path, duration, video_path, w, h, fps=video_fps, bpm=beat_data["bpm"])
 
 
 if __name__ == "__main__":
